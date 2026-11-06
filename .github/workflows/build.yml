@@ -1,4 +1,5 @@
-name: Build APK
+
+name: Build and Release AAB
 
 on:
   push:
@@ -22,18 +23,47 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: '8.9'
+          gradle-version: '8.11.1'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK 36
+        run: |
+          sdkmanager "platforms;android-36" "build-tools;36.0.0"
 
       - name: Extract project
         run: unzip -q unsee.zip
-        
+
       - name: Remove invalid font README
         run: rm -f unsee/app/src/main/res/font/README.txt
-      - name: Build APK
-        run: gradle -p unsee assembleDebug --no-daemon
 
-      - name: Upload APK
+      - name: Prepare signing key
+        run: |
+          echo "${{ secrets.UNSEE_KEYSTORE_BASE64 }}" | base64 --decode > "$RUNNER_TEMP/unsee-upload-key.jks"
+
+      - name: Verify signing secrets
+        run: |
+          test -s "$RUNNER_TEMP/unsee-upload-key.jks"
+          test -n "${{ secrets.UNSEE_KEYSTORE_PASSWORD }}"
+          test -n "${{ secrets.UNSEE_KEY_ALIAS }}"
+          test -n "${{ secrets.UNSEE_KEY_PASSWORD }}"
+
+      - name: Build APK and AAB
+        working-directory: unsee
+        env:
+          UNSEE_KEYSTORE_FILE: ${{ runner.temp }}/unsee-upload-key.jks
+          UNSEE_KEYSTORE_PASSWORD: ${{ secrets.UNSEE_KEYSTORE_PASSWORD }}
+          UNSEE_KEY_ALIAS: ${{ secrets.UNSEE_KEY_ALIAS }}
+          UNSEE_KEY_PASSWORD: ${{ secrets.UNSEE_KEY_PASSWORD }}
+        run: |
+          gradle testDebugUnitTest assembleDebug bundleRelease --no-daemon --stacktrace
+
+      - name: Upload APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: unsee-debug-apk
-          path: unsee/app/build/outputs/apk/debug/app-debug.apk
+          name: unsee-play-store-release
+          path: |
+            unsee/app/build/outputs/apk/debug/app-debug.apk
+            unsee/app/build/outputs/bundle/release/app-release.aab
+          if-no-files-found: error
